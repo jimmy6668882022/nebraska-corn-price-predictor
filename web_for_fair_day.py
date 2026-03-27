@@ -2,6 +2,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import pickle
+
+# --- LOAD TRAINED MODEL AND SCALER ---
+# This brings the intelligence from your notebook into the web app!
+with open('rf_model.pkl', 'rb') as f:
+    rf_model = pickle.load(f)
+
+with open('scaler.pkl', 'rb') as f:
+    scaler = pickle.load(f)
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Harvest or Hold? Forecaster", layout="wide")
@@ -22,7 +31,7 @@ window_size = st.sidebar.number_input("Momentum Window Size (Weeks)", min_value=
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Seasonal & Price Baseline")
-st.sidebar.markdown("*Tip: Refer to the 'Seasonality' column in `Master Sheet for MSEF.csv` for the 10-year baseline average for target week.*")
+st.sidebar.markdown("*Tip: Refer to the 'Seasonality' column in your `Master Sheet for MSEF.csv` for the 10-year baseline average for your target week.*")
 
 # Clickable link to your Master Spreadsheet
 st.sidebar.markdown("[📊 Master Spreadsheet Reference](https://docs.google.com/spreadsheets/d/1H_GvT5G7hVf1jKdgth3KPQGPs6svWit6x7ozwhnGmMA/edit?usp=sharing)")
@@ -44,7 +53,7 @@ demand_livestock = st.sidebar.number_input("Livestock Demand (Head)", value=2500
 # Step-by-Step USDA QuickStats Instructions for Livestock
 with st.sidebar.expander("🐄 How to find Livestock Data"):
     st.markdown("""
-    1. Go to [USDA QuickStats](https://quickstats.nass.usda.gov/)
+    1. Go to the [USDA QuickStats website](https://quickstats.nass.usda.gov/)
     2. **Program:** Survey
     3. **Sector:** Animals & Products
     4. **Group:** Livestock
@@ -58,14 +67,14 @@ with st.sidebar.expander("🐄 How to find Livestock Data"):
 st.sidebar.markdown("---")
 st.sidebar.subheader("Supply Factors")
 
-# *** NEW: Step-by-Step USDA QuickStats Instructions for Harvest Supply ***
+# Step-by-Step USDA QuickStats Instructions for Harvest Supply
 with st.sidebar.expander("🌽 How to calculate Harvest Bushels"):
     st.markdown("""
-    **Step 1:** Go to [USDA QuickStats](https://quickstats.nass.usda.gov/)
+    **Step 1:** Go to the [USDA QuickStats website](https://quickstats.nass.usda.gov/)
     
     **Step 2:** Select **Program:** Survey -> **Sector:** Crops -> **Commodity:** Corn -> **Category:** Progress -> **Data Item:** CORN, GRAIN - PROGRESS, MEASURED IN PCT HARVESTED -> **State:** Nebraska.
     
-    **Step 3:** Find the percentage harvested for  target week.
+    **Step 3:** Find the percentage harvested for your target week.
     
     **Step 4:** Multiply this percentage (as a decimal) by the newest annual total bushels produced (e.g., 2,027,300,000 bushels for 2025) to get the **Cumulative Harvest**.
     
@@ -92,8 +101,11 @@ if st.button("🚀 Run Chained Forecast"):
     current_confidence = 98.0
     
     for week in range(current_week + 1, target_week + 1):
+        
+        # 1. Calculate the Rolling Momentum
         moving_avg = np.mean(recent_prices[-window_size:])
         
+        # 2. Define Features (X) exactly as the model was trained!
         future_conditions = pd.DataFrame({
             'Week_Num': [week],
             'Seasonality': [current_seasonality], 
@@ -104,12 +116,13 @@ if st.button("🚀 Run Chained Forecast"):
             'Demand_Livestock': [demand_livestock]       
         })
 
-        # --- MOCK PREDICTION STEP ---
-        # Note: Replace this with your actual model prediction!
-        # future_scaled = scaler.transform(future_conditions)
-        # raw_deviation = rf_model.predict(future_scaled)
-        raw_deviation = 0.05 # Mocked shift for demonstration
+        # 3. PREDICTION STEP
+        future_scaled = scaler.transform(future_conditions)
         
+        # The model predicts the exact DEVIATION from the momentum
+        raw_deviation = rf_model.predict(future_scaled)[0] 
+        
+        # 4. Cap the shift and calculate the final price
         deviation = np.clip(raw_deviation, -MAX_WEEKLY_SHIFT, MAX_WEEKLY_SHIFT)
         predicted_price = moving_avg + deviation
         
@@ -118,7 +131,7 @@ if st.button("🚀 Run Chained Forecast"):
         forecast_prices.append(predicted_price)
         
         st.write(f"**Week {week}** | Momentum: ${moving_avg:.2f} | Shift: ${deviation:+.2f} | **PRED PRICE: ${predicted_price:.2f}** | Confidence: {current_confidence:.1f}%")
-        current_confidence -= 2.0
+        current_confidence -= 2.0 
 
     st.success(f"Final Projected Price for Week {target_week}: **${recent_prices[-1]:.2f}**")
 
